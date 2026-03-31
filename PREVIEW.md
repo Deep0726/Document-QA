@@ -8,7 +8,7 @@ This document provides a complete walkthrough of the application.
 
 Users can upload a document or join an existing session.
 
-![Home](home.png)
+![Home](assets/Home.png)
 
 ---
 
@@ -16,7 +16,7 @@ Users can upload a document or join an existing session.
 
 Uploaded document is previewed before processing.
 
-![Preview](preview.png)
+![Preview](assets/Preview.png)
 
 ---
 
@@ -24,7 +24,7 @@ Uploaded document is previewed before processing.
 
 Users create a session ID to track conversations.
 
-![Session](session.png)
+![Session](assets/Session.png)
 
 ---
 
@@ -35,7 +35,7 @@ System processes document using:
 - Embedding generation
 - Vector storage
 
-![Processing](processing.png)
+![Processing](assets/Processing.png)
 
 ---
 
@@ -43,7 +43,7 @@ System processes document using:
 
 Users can ask questions and receive context-aware answers.
 
-![Chat](chat.png)
+![Chat](assets/Chat.png)
 
 ---
 
