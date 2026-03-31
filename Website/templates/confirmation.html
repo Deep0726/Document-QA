@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Document Uploaded - AI Document Query{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-background flex flex-col items-center py-12 px-4 sm:px-6 relative overflow-hidden">
+
+  <!-- Neon animated background -->
+  <div class="neon-bg">
+    <div class="neon-orb neon-orb-1" style="opacity:0.3;"></div>
+    <div class="neon-orb neon-orb-2" style="opacity:0.25;"></div>
+    <div class="neon-orb neon-orb-3" style="opacity:0.2;"></div>
+    <div class="bubble bubble-1"></div>
+    <div class="bubble bubble-2"></div>
+    <div class="bubble bubble-3"></div>
+    <div class="bubble bubble-4"></div>
+    <div class="bubble bubble-5"></div>
+    <div class="bubble bubble-6"></div>
+    <div class="absolute inset-0 bg-background/65"></div>
+  </div>
+
+  <div class="relative z-10 w-full flex flex-col items-center">
+
+    <!-- Success banner -->
+    <div class="w-full max-w-4xl flex items-center justify-center space-x-3 mb-8 py-4 px-6 rounded-2xl border animate-fadeInUp"
+         style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">
+      <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <h2 class="text-lg font-semibold tracking-tight">Document uploaded successfully</h2>
+    </div>
+
+    <!-- Card -->
+    <div class="w-full max-w-4xl card shadow-xl animate-scaleIn" style="animation-delay:0.1s;">
+
+      <!-- Header bar -->
+      <div class="border-b border-border px-6 py-4 flex items-center justify-between"
+           style="background:hsl(214,32%,96%);">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 rounded-lg" style="background:hsl(221,83%,95%);color:var(--primary);">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <span class="font-semibold text-foreground truncate max-w-xs sm:max-w-md">{{ filename }}</span>
+        </div>
+        <div class="text-xs font-medium px-3 py-1.5 rounded-md"
+             style="background:var(--muted);color:var(--muted-foreground);">
+          Preview Mode
+        </div>
+      </div>
+
+      <!-- Smart file preview (PDF / DOCX / XLSX / CSV / TXT) -->
+      <div id="preview-area"
+           style="width:100%;height:55vh;min-height:420px;overflow:hidden;background:white;">
+      </div>
+
+      <!-- Footer actions -->
+      <div class="bg-white border-t border-border p-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <a href="{{ url_for('upload_page') }}" class="btn btn-secondary w-full sm:w-auto group">
+          <svg class="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+          </svg>
+          Upload Another Document
+        </a>
+        <a href="{{ url_for('chat_page') }}" class="btn btn-primary btn-lg w-full sm:w-auto">
+          Process &amp; Start Asking
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Info cards below -->
+    <div class="w-full max-w-4xl mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 animate-fadeIn" style="animation-delay:0.2s;">
+      {% for icon_path, label, desc in [
+        ('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', 'Document Ready', 'Your file has been received and is ready for AI processing.'),
+        ('M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18', 'Smart Chunking', 'Text will be split into optimal segments for the AI model.'),
+        ('M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z', 'AI Powered', 'Advanced language models will answer your questions accurately.'),
+      ] %}
+      <div class="card p-5 flex items-start gap-4">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+             style="background:hsl(221,83%,95%);color:var(--primary);">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon_path }}"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="font-semibold text-sm text-foreground mb-1">{{ label }}</h3>
+          <p class="text-xs text-muted-foreground leading-relaxed">{{ desc }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/preview.js') }}"></script>
+<script>
+  initSmartPreview('preview-area', '{{ url_for('api_preview_file') }}', {{ filename | tojson }});
+</script>
+{% endblock %}

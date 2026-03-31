@@ -1,0 +1,1391 @@
+{% extends "base.html" %}
+{% block title %}Chat - AI Document Query{% endblock %}
+
+{% block content %}
+
+<style>
+/* ── Markdown rendered content ── */
+.md h2 { font-size:15px; font-weight:700; color:var(--foreground); margin:12px 0 6px; font-family:'Outfit',sans-serif; }
+.md h3 { font-size:13px; font-weight:700; color:var(--foreground); margin:10px 0 4px; }
+.md p  { margin:0 0 8px; line-height:1.65; }
+.md p:last-child { margin-bottom:0; }
+.md ul { margin:4px 0 8px 0; padding-left:18px; }
+.md ol { margin:4px 0 8px 0; padding-left:20px; }
+.md li { margin-bottom:4px; line-height:1.6; }
+.md li ul, .md li ol { margin:3px 0 3px 0; }
+.md strong { font-weight:700; color:var(--foreground); }
+.md code { background:hsl(214,32%,94%); border-radius:4px; padding:1px 6px; font-size:12px; font-family:'Courier New',monospace; color:#6366f1; }
+.md hr { border:none; border-top:1px solid var(--border); margin:10px 0; }
+@keyframes cursorBlink { 0%,100%{opacity:1} 50%{opacity:0} }
+.stream-cursor { animation: cursorBlink 0.8s cubic-bezier(0.4,0,0.6,1) infinite; font-size:13px; color:var(--primary); margin-left:1px; vertical-align:middle; }
+
+/* ── Typewriter smooth fade-in per char ── */
+@keyframes charFadeIn { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:translateY(0)} }
+
+@keyframes typingBounce {
+  0%,80%,100% { transform: translateY(0) scale(1); opacity:0.35; }
+  40%         { transform: translateY(-6px) scale(1.1); opacity:1; }
+}
+.typing-dot {
+  width:7px; height:7px; border-radius:50%;
+  background: linear-gradient(135deg,#6366f1,#3b82f6);
+  display:inline-block;
+  animation: typingBounce 1.4s cubic-bezier(0.45,0,0.55,1) infinite;
+  will-change: transform, opacity;
+}
+.typing-dot:nth-child(2) { animation-delay:0.18s; }
+.typing-dot:nth-child(3) { animation-delay:0.36s; }
+
+/* ── Copy button ── */
+.msg-wrap { position:relative; }
+.copy-btn {
+  opacity:0; transition:opacity 0.15s;
+  background:none; border:none; cursor:pointer;
+  padding:3px 7px; border-radius:5px;
+  color:var(--muted-foreground); font-size:11px;
+  display:inline-flex; align-items:center; gap:4px;
+  margin-top:4px;
+}
+.copy-btn:hover { background:var(--muted); color:var(--foreground); }
+.msg-wrap:hover .copy-btn { opacity:1; }
+.copy-btn.copied { color:#22c55e; opacity:1; }
+
+/* ── Timestamp ── */
+.msg-time {
+  font-size:10px; color:var(--muted-foreground);
+  margin-top:3px; opacity:0.65; display:block;
+}
+
+/* ── Search bar ── */
+#search-bar {
+  display:none;
+  padding:8px 16px;
+  background:rgba(255,255,255,0.85);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid rgba(255,255,255,0.3);
+  flex-shrink:0; z-index:5;
+  align-items:center; gap:8px;
+}
+#search-bar.open { display:flex; }
+#search-input {
+  flex:1; padding:7px 12px; border-radius:8px;
+  border:1.5px solid var(--border); background:white;
+  font-size:13px; color:var(--foreground); outline:none;
+  transition:border 0.2s,box-shadow 0.2s;
+}
+#search-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(99,102,241,0.12); }
+.msg-highlight { background:#fef08a; border-radius:2px; }
+.msg-highlight.current { background:#fb923c; color:white; }
+#search-count { font-size:11px; color:var(--muted-foreground); white-space:nowrap; min-width:52px; }
+
+/* ── Download modal ── */
+#dl-modal-overlay {
+  display:none; position:fixed; inset:0; z-index:9995;
+  background:rgba(15,23,42,0.5); backdrop-filter:blur(4px);
+  align-items:center; justify-content:center;
+}
+#dl-modal-overlay.open { display:flex; }
+.dl-box {
+  background:white; border-radius:16px;
+  box-shadow:0 24px 60px rgba(0,0,0,0.2);
+  padding:28px; max-width:360px; width:90%;
+  animation:scaleIn 0.18s ease-out;
+}
+.dl-btn {
+  display:flex; align-items:center; gap:12px;
+  width:100%; padding:13px 16px; margin-bottom:10px;
+  border-radius:10px; border:1.5px solid var(--border);
+  background:white; cursor:pointer; font-size:14px;
+  font-weight:600; color:var(--foreground);
+  transition:all 0.15s; text-align:left;
+}
+.dl-btn:hover { background:hsl(214,32%,97%); border-color:var(--primary); color:var(--primary); }
+</style>
+
+<!-- ═══ Embedding Loader Overlay ═══ -->
+<div id="embedding-loader-overlay">
+  <div class="el-neon-bg">
+    <div class="el-orb el-orb-1"></div>
+    <div class="el-orb el-orb-2"></div>
+    <div class="el-orb el-orb-3"></div>
+  </div>
+  <div class="el-card">
+    <div class="el-spinner-wrap">
+      <div class="el-spinner-ring">
+        <svg width="80" height="80" viewBox="0 0 100 100">
+          <circle class="el-ring-bg"   cx="50" cy="50" r="45" stroke-width="6"/>
+          <circle class="el-ring-fill" cx="50" cy="50" r="45" stroke-width="6"/>
+        </svg>
+        <div class="el-spinner-icon">
+          <svg width="28" height="28" fill="none" stroke="hsl(221,83%,53%)" stroke-width="1.8" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.607L5 14.5m14.8.5l.43 2.109a2.25 2.25 0 01-2.247 2.641h-9.97a2.25 2.25 0 01-2.247-2.641L5 14.5"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <p class="el-title">AI Document Processing</p>
+    <p class="el-subtitle">Analyzing your document&hellip;<br/>Please wait, this will complete shortly.</p>
+    <div class="el-progress-wrap"><div class="el-progress-bar" id="el-progress-bar"></div></div>
+    <div class="el-steps">
+      <div class="el-step el-waiting" id="el-step-1">
+        <div class="el-step-icon">
+          <div class="el-step-dot"></div>
+          <svg class="el-step-svg" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </div>
+        <div class="el-step-text">
+          <div class="el-step-label">Document Reading</div>
+          <div class="el-step-desc">Extracting content from your file</div>
+        </div>
+      </div>
+      <div class="el-step el-waiting" id="el-step-2">
+        <div class="el-step-icon">
+          <div class="el-step-dot"></div>
+          <svg class="el-step-svg" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h4"/></svg>
+        </div>
+        <div class="el-step-text">
+          <div class="el-step-label">Text Chunking</div>
+          <div class="el-step-desc">Splitting content into smaller segments</div>
+        </div>
+      </div>
+      <div class="el-step el-waiting" id="el-step-3">
+        <div class="el-step-icon">
+          <div class="el-step-dot"></div>
+          <svg class="el-step-svg" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+        </div>
+        <div class="el-step-text">
+          <div class="el-step-label">Vector Embeddings</div>
+          <div class="el-step-desc">Converting text into vectors and saving to FAISS</div>
+        </div>
+      </div>
+      <div class="el-step el-waiting" id="el-step-4">
+        <div class="el-step-icon">
+          <div class="el-step-dot"></div>
+          <svg class="el-step-svg" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.607L5 14.5m14.8.5l.43 2.109a2.25 2.25 0 01-2.247 2.641h-9.97a2.25 2.25 0 01-2.247-2.641L5 14.5"/></svg>
+        </div>
+        <div class="el-step-text">
+          <div class="el-step-label">AI Model Loading</div>
+          <div class="el-step-desc">Loading embedding model into memory</div>
+        </div>
+      </div>
+    </div>
+    <div class="el-hint">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      First time may take longer — model is being downloaded
+    </div>
+  </div>
+</div>
+<!-- ═══ /Embedding Loader Overlay ═══ -->
+
+<div id="chat-layout" class="chat-layout" style="display:flex;height:100vh;overflow:hidden;position:relative;">
+
+  <!-- Neon background -->
+  <div class="neon-bg">
+    <div class="neon-orb neon-orb-1" style="opacity:0.22;"></div>
+    <div class="neon-orb neon-orb-2" style="opacity:0.18;"></div>
+    <div class="neon-orb neon-orb-3" style="opacity:0.15;"></div>
+    <div class="bubble bubble-1"></div>
+    <div class="bubble bubble-2"></div>
+    <div class="bubble bubble-3"></div>
+    <div class="bubble bubble-4"></div>
+    <div class="bubble bubble-5"></div>
+    <div class="bubble bubble-6"></div>
+    <div class="absolute inset-0" style="background:rgba(250,251,253,0.82);"></div>
+  </div>
+
+  <!-- Session Modal -->
+  <div id="session-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width:440px;">
+
+      <!-- ── STEP 1: Enter Session ID ── -->
+      <div id="step-1">
+        <div class="flex flex-col items-center text-center space-y-4">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center" style="background:hsl(221,83%,95%);color:var(--primary);">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"/>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold" style="font-family:'Outfit',sans-serif;color:var(--foreground);">Enter Session ID</h2>
+          <p class="text-sm leading-relaxed" style="color:var(--muted-foreground);">
+            Enter a unique session ID to track your conversation. Use the same ID later to resume your chat history.
+          </p>
+          <form id="step1-form" class="w-full" style="padding-top:1rem;">
+            <input id="session-id-input" type="text" autocomplete="off"
+                   placeholder="e.g. my-research-session"
+                   style="width:100%;padding:0.9rem 1.1rem;border-radius:0.75rem;border:1.5px solid var(--border);background:hsl(214,32%,97%);color:var(--foreground);font-size:1rem;font-weight:500;text-align:center;outline:none;transition:border 0.2s,box-shadow 0.2s;margin-bottom:1rem;" />
+            <div id="step1-error" style="display:none;margin-bottom:0.75rem;padding:0.65rem 1rem;background:#fef2f2;border:1px solid #fecaca;border-radius:0.6rem;color:#dc2626;font-size:13px;font-weight:500;text-align:left;"></div>
+            <button type="submit" id="check-session-btn" class="btn btn-primary w-full btn-lg" disabled>
+              Continue
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+              </svg>
+            </button>
+            <button type="button" onclick="window.location.href='/'" 
+                    style="width:100%;margin-top:8px;padding:0.75rem;border-radius:0.65rem;border:1.5px solid var(--border);background:none;color:var(--muted-foreground);font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s,color 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;"
+                    onmouseover="this.style.background='var(--muted)';this.style.color='var(--foreground)'" 
+                    onmouseout="this.style.background='none';this.style.color='var(--muted-foreground)'">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+              Back to Upload
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- ── STEP 2: Password (new or existing) ── -->
+      <div id="step-2" style="display:none;">
+
+        <!-- Notice banner (shown only for existing sessions) -->
+        <div id="existing-notice" style="display:none;margin-bottom:1.25rem;padding:0.85rem 1rem;border-radius:0.75rem;border:1.5px solid #fde68a;background:#fffbeb;color:#92400e;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <svg width="17" height="17" fill="none" stroke="#d97706" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            <span style="font-size:13px;font-weight:700;color:#92400e;">Session Already Exists</span>
+          </div>
+          <p style="font-size:12px;color:#a16207;line-height:1.5;margin:0;">
+            This session ID was previously created. You need the correct password to access it.
+            Created on: <span id="session-created-date" style="font-weight:600;"></span>
+          </p>
+        </div>
+
+        <!-- Icon + title change depending on new vs existing -->
+        <div class="flex flex-col items-center text-center" style="margin-bottom:1.25rem;">
+          <div id="step2-icon" class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:hsl(221,83%,95%);color:var(--primary);margin-bottom:0.75rem;">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+          </div>
+          <h2 id="step2-title" class="text-xl font-bold" style="font-family:'Outfit',sans-serif;color:var(--foreground);">Set a Password</h2>
+          <p id="step2-subtitle" class="text-sm" style="color:var(--muted-foreground);margin-top:4px;">
+            Create a password to protect this session.
+          </p>
+        </div>
+
+        <form id="step2-form">
+          <div style="margin-bottom:0.85rem;">
+            <label style="font-size:12px;font-weight:600;color:var(--muted-foreground);display:block;margin-bottom:6px;letter-spacing:0.03em;">SESSION ID</label>
+            <div id="session-id-display" style="padding:0.7rem 1rem;border-radius:0.6rem;background:hsl(214,32%,97%);border:1.5px solid var(--border);font-size:14px;font-weight:600;color:var(--foreground);font-family:'Courier New',monospace;"></div>
+          </div>
+
+          <div style="margin-bottom:0.85rem;">
+            <label for="password-input" style="font-size:12px;font-weight:600;color:var(--muted-foreground);display:block;margin-bottom:6px;letter-spacing:0.03em;">PASSWORD</label>
+            <div style="position:relative;">
+              <input id="password-input" type="password" autocomplete="new-password"
+                     placeholder="Enter password"
+                     style="width:100%;padding:0.85rem 2.8rem 0.85rem 1rem;border-radius:0.65rem;border:1.5px solid var(--border);background:hsl(214,32%,97%);color:var(--foreground);font-size:0.95rem;font-weight:500;outline:none;transition:border 0.2s,box-shadow 0.2s;box-sizing:border-box;" />
+              <button type="button" onclick="togglePwdVisibility('password-input','eye-icon-1')"
+                      style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted-foreground);padding:4px;">
+                <svg id="eye-icon-1" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Confirm password field — only shown for new sessions -->
+          <div id="confirm-pwd-wrap" style="margin-bottom:0.85rem;">
+            <label for="confirm-password-input" style="font-size:12px;font-weight:600;color:var(--muted-foreground);display:block;margin-bottom:6px;letter-spacing:0.03em;">CONFIRM PASSWORD</label>
+            <div style="position:relative;">
+              <input id="confirm-password-input" type="password" autocomplete="new-password"
+                     placeholder="Re-enter password"
+                     style="width:100%;padding:0.85rem 2.8rem 0.85rem 1rem;border-radius:0.65rem;border:1.5px solid var(--border);background:hsl(214,32%,97%);color:var(--foreground);font-size:0.95rem;font-weight:500;outline:none;transition:border 0.2s,box-shadow 0.2s;box-sizing:border-box;" />
+              <button type="button" onclick="togglePwdVisibility('confirm-password-input','eye-icon-2')"
+                      style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted-foreground);padding:4px;">
+                <svg id="eye-icon-2" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div id="step2-error" style="display:none;margin-bottom:0.75rem;padding:0.65rem 1rem;background:#fef2f2;border:1px solid #fecaca;border-radius:0.6rem;color:#dc2626;font-size:13px;font-weight:500;"></div>
+
+          <div style="display:flex;gap:8px;margin-top:0.25rem;">
+            <button type="button" onclick="goBackToStep1()"
+                    style="flex:0 0 auto;padding:0.8rem 1.1rem;border-radius:0.65rem;border:1.5px solid var(--border);background:white;color:var(--foreground);font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;"
+                    onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">
+              ← Back
+            </button>
+            <button type="submit" id="start-session-btn" class="btn btn-primary btn-lg" style="flex:1;">
+              Start Session
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ══ LEFT PANEL: Document Viewer ══ -->
+  <div id="doc-panel" style="width:45%;min-width:280px;max-width:75%;display:flex;flex-direction:column;position:relative;z-index:10;border-right:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.25);backdrop-filter:blur(8px);flex-shrink:0;">
+
+    <!-- Doc Panel Header -->
+    <div style="height:64px;border-bottom:1px solid rgba(255,255,255,0.35);display:flex;align-items:center;padding:0 1.25rem;gap:0.75rem;background:rgba(255,255,255,0.65);backdrop-filter:blur(10px);flex-shrink:0;z-index:2;">
+      <div style="padding:0.375rem;border-radius:0.5rem;background:hsl(221,83%,95%);color:var(--primary);flex-shrink:0;">
+        <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <span style="font-weight:600;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;">{{ filename }}</span>
+
+      <!-- Zoom controls -->
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button onclick="zoomOut()" title="Zoom Out"
+                style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--foreground);font-size:14px;font-weight:700;transition:background 0.15s;"
+                onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">−</button>
+        <span id="zoom-label" style="font-size:11px;font-weight:600;color:var(--muted-foreground);min-width:36px;text-align:center;">100%</span>
+        <button onclick="zoomIn()" title="Zoom In"
+                style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--foreground);font-size:14px;font-weight:700;transition:background 0.15s;"
+                onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">+</button>
+        <button onclick="resetZoom()" title="Reset"
+                style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s;"
+                onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">
+          <svg width="13" height="13" fill="none" stroke="var(--muted-foreground)" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Session badge -->
+      <div id="session-badge" class="hidden badge badge-green" style="flex-shrink:0;">
+        <svg style="width:12px;height:12px;" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+        </svg>
+        <span id="session-badge-text">Active</span>
+      </div>
+
+      <a href="{{ url_for('upload_page') }}" style="font-size:11px;color:var(--muted-foreground);text-decoration:none;flex-shrink:0;margin-left:4px;"
+         onmouseover="this.style.color='var(--foreground)'" onmouseout="this.style.color='var(--muted-foreground)'">
+        ← New
+      </a>
+    </div>
+
+    <!-- File Preview (ORIGINAL - unchanged) -->
+    <div id="preview-scroll-area" style="flex:1;overflow:auto;background:hsl(214,32%,95%);position:relative;">
+      <div id="drag-overlay" style="display:none;position:absolute;inset:0;z-index:50;cursor:col-resize;"></div>
+      <div id="preview-area" style="width:100%;min-height:100%;background:white;transform-origin:top left;"></div>
+    </div>
+  </div>
+
+  <!-- ══ DRAG DIVIDER ══ -->
+  <div id="drag-divider"
+       style="width:6px;cursor:col-resize;background:transparent;flex-shrink:0;position:relative;z-index:20;display:flex;align-items:center;justify-content:center;"
+       onmousedown="startDrag(event)">
+    <div id="drag-handle-bar"
+         style="width:4px;height:48px;border-radius:9999px;background:rgba(100,116,139,0.25);transition:background 0.15s,height 0.15s;"></div>
+  </div>
+
+  <!-- ══ RIGHT PANEL: Chat ══ -->
+  <div id="chat-panel" style="flex:1;display:flex;flex-direction:column;position:relative;z-index:10;min-width:320px;overflow:hidden;">
+
+    <!-- End Session Dropdown Modal -->
+    <div id="end-dropdown-overlay" onclick="closeEndDropdown()" style="display:none;position:fixed;inset:0;z-index:998;"></div>
+    <div id="end-dropdown-menu" style="display:none;position:fixed;z-index:999;background:white;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.14),0 2px 8px rgba(0,0,0,0.08);min-width:210px;overflow:hidden;">
+      <div style="padding:8px 14px 6px;font-size:11px;font-weight:600;color:var(--muted-foreground);letter-spacing:0.05em;text-transform:uppercase;border-bottom:1px solid var(--border);">Session Options</div>
+      <button onclick="closeSession()" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;background:none;border:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--foreground);text-align:left;transition:background 0.12s;"
+              onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='none'">
+        <svg width="15" height="15" fill="none" stroke="#3b82f6" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+        </svg>
+        <div>
+          <div>Close Session</div>
+          <div style="font-size:11px;color:var(--muted-foreground);font-weight:400;">Save history &amp; go to home</div>
+        </div>
+      </button>
+      <button onclick="endSession()" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;background:none;border:none;border-top:1px solid var(--border);cursor:pointer;font-size:13px;font-weight:500;color:#dc2626;text-align:left;transition:background 0.12s;"
+              onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='none'">
+        <svg width="15" height="15" fill="none" stroke="#dc2626" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+        <div>
+          <div>End Session</div>
+          <div style="font-size:11px;color:#f87171;font-weight:400;">Delete history &amp; go to home</div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Chat header -->
+    <div style="height:64px;border-bottom:1px solid rgba(255,255,255,0.3);display:flex;align-items:center;padding:0 1.25rem;gap:0.75rem;background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);flex-shrink:0;z-index:2;">
+      <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#3b82f6);color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/>
+        </svg>
+      </div>
+      <div>
+        <div style="font-size:14px;font-weight:700;color:var(--foreground);line-height:1.1;">AI Assistant</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-top:2px;">
+          <span id="status-dot" style="width:7px;height:7px;border-radius:50%;background:#d1d5db;display:inline-block;"></span>
+          <span id="status-text" style="font-size:11px;color:var(--muted-foreground);">Waiting for session...</span>
+        </div>
+      </div>
+      <!-- NEW: Search + Download buttons -->
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+        <button id="search-toggle-btn" onclick="toggleSearch()" disabled
+                style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1.5px solid var(--border);background:white;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted-foreground);transition:all 0.15s;opacity:0.5;"
+                onmouseover="if(!this.disabled)this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          Search
+        </button>
+        <button id="download-chat-btn" onclick="openDlModal()" disabled
+                style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1.5px solid var(--border);background:white;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted-foreground);transition:all 0.15s;opacity:0.5;"
+                onmouseover="if(!this.disabled)this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download
+        </button>
+        <button id="end-session-btn" onclick="toggleEndDropdown(event)" disabled
+                style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid var(--border);background:white;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted-foreground);transition:all 0.15s;opacity:0.5;"
+                onmouseover="if(!this.disabled){this.style.borderColor='#dc2626';this.style.color='#dc2626';this.style.background='#fef2f2';}"
+                onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted-foreground)';this.style.background='white';">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          End
+          <svg width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="opacity:0.6;"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- NEW: Search Bar (hidden by default) -->
+    <div id="search-bar">
+      <svg width="14" height="14" fill="none" stroke="var(--muted-foreground)" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <input id="search-input" type="text" placeholder="Search messages... (Enter=next, Shift+Enter=prev)"
+             oninput="doSearch(this.value)" onkeydown="searchKey(event)" />
+      <span id="search-count"></span>
+      <button onclick="searchNav(-1)" style="background:none;border:none;cursor:pointer;padding:3px 5px;border-radius:4px;color:var(--muted-foreground);" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='none'">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <button onclick="searchNav(1)" style="background:none;border:none;cursor:pointer;padding:3px 5px;border-radius:4px;color:var(--muted-foreground);" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='none'">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+      </button>
+      <button onclick="closeSearch()" style="background:none;border:none;cursor:pointer;padding:3px 7px;border-radius:4px;color:var(--muted-foreground);font-size:13px;" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='none'">✕</button>
+    </div>
+
+    <!-- Messages area -->
+    <div id="messages-area" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px;">
+      <div id="empty-state" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 20px;">
+        <div style="width:60px;height:60px;border-radius:16px;background:rgba(255,255,255,0.75);border:1px solid rgba(255,255,255,0.6);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+          <svg style="width:28px;height:28px;color:var(--primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+          </svg>
+        </div>
+        <h3 style="font-size:17px;font-weight:700;color:var(--foreground);margin-bottom:8px;">Start a conversation</h3>
+        <p style="font-size:13px;color:var(--muted-foreground);max-width:260px;line-height:1.6;">
+          Enter a session ID to begin chatting with your document.
+        </p>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div style="padding:8px 16px 16px;flex-shrink:0;position:relative;">
+      <form id="chat-form" onsubmit="sendMessage(event)">
+        <div class="chat-input-wrap" style="display:flex;align-items:flex-end;background:white;border:1.5px solid var(--border);border-radius:14px;box-shadow:0 4px 16px rgba(0,0,0,0.07);position:relative;overflow:visible;">
+
+          <!-- Model Selector -->
+          <div style="padding:8px;flex-shrink:0;align-self:flex-end;position:relative;">
+            <button type="button" id="model-btn" onclick="toggleDropdown(event)" disabled
+                    style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:var(--muted);color:var(--foreground);border:none;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;transition:background 0.15s;">
+              <span id="model-icon" style="display:flex;align-items:center;line-height:1;">
+                <svg width="13" height="13" fill="none" stroke="#3b82f6" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+              </span>
+              <span id="model-label">Balanced Model</span>
+              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="opacity:0.45;"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div id="model-dropdown-menu" style="display:none;position:fixed;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:0 -4px 24px rgba(0,0,0,0.13),0 2px 8px rgba(0,0,0,0.06);min-width:200px;z-index:9999;overflow:hidden;">
+              <div class="model-opt" data-model="Fast Model" onclick="selectModel(this)"
+                   style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;font-size:13px;color:var(--foreground);transition:background 0.1s;"
+                   onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background=this.classList.contains('selected')?'hsl(214,32%,97%)':'transparent'">
+                <svg width="15" height="15" fill="none" stroke="#eab308" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span style="font-weight:500;">Fast Model</span>
+                <svg class="model-check" width="15" height="15" fill="#6366f1" viewBox="0 0 20 20" style="margin-left:auto;display:none;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+              </div>
+              <div class="model-opt selected" data-model="Balanced Model" onclick="selectModel(this)"
+                   style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;font-size:13px;color:var(--foreground);background:hsl(214,32%,97%);transition:background 0.1s;"
+                   onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background=this.classList.contains('selected')?'hsl(214,32%,97%)':'transparent'">
+                <svg width="15" height="15" fill="none" stroke="#3b82f6" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+                <span style="font-weight:500;">Balanced Model</span>
+                <svg class="model-check" width="15" height="15" fill="#6366f1" viewBox="0 0 20 20" style="margin-left:auto;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+              </div>
+              <div class="model-opt" data-model="Advanced Model" onclick="selectModel(this)"
+                   style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;font-size:13px;color:var(--foreground);transition:background 0.1s;"
+                   onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background=this.classList.contains('selected')?'hsl(214,32%,97%)':'transparent'">
+                <svg width="15" height="15" fill="none" stroke="#9333ea" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                <span style="font-weight:500;">Advanced Model</span>
+                <svg class="model-check" width="15" height="15" fill="#6366f1" viewBox="0 0 20 20" style="margin-left:auto;display:none;"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Separator -->
+          <div style="width:1px;height:24px;background:var(--border);align-self:center;flex-shrink:0;opacity:0.6;"></div>
+
+          <!-- Textarea -->
+          <textarea id="chat-input" rows="1"
+                    placeholder="Ask a question about your document..."
+                    disabled
+                    oninput="autoResize(this)"
+                    onkeydown="handleKeydown(event)"
+                    style="flex:1;background:transparent;border:none;outline:none;color:var(--foreground);padding:12px 10px;font-size:14px;font-family:'Inter',sans-serif;resize:none;min-height:42px;max-height:160px;line-height:1.5;"></textarea>
+
+          <!-- Send button -->
+          <div style="padding:8px;flex-shrink:0;">
+            <button type="submit" id="send-btn" disabled
+                    style="width:38px;height:38px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:white;background:linear-gradient(135deg,#6366f1,#3b82f6);box-shadow:0 2px 12px rgba(99,102,241,0.4);transition:transform 0.15s,opacity 0.15s,box-shadow 0.15s;"
+                    onmouseover="if(!this.disabled){this.style.transform='scale(1.1)';this.style.boxShadow='0 4px 18px rgba(99,102,241,0.55)'}"
+                    onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 2px 12px rgba(99,102,241,0.4)'">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" style="margin-left:2px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </form>
+      <p style="text-align:center;font-size:10px;color:rgba(100,116,139,0.55);margin-top:7px;">
+        AI responses may be inaccurate — verify in the original document.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ CLOSE SESSION CONFIRM MODAL ══ -->
+<div id="close-confirm-overlay" onclick="hideCloseConfirm()" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);align-items:center;justify-content:center;">
+  <div onclick="event.stopPropagation()" style="background:white;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.2);padding:32px 28px;max-width:400px;width:90%;animation:scaleIn 0.18s ease-out;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+      <div style="width:44px;height:44px;border-radius:12px;background:hsl(221,83%,95%);color:#3b82f6;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+      </div>
+      <div>
+        <div style="font-size:16px;font-weight:700;color:var(--foreground);font-family:'Outfit',sans-serif;">Close Session?</div>
+        <div style="font-size:12px;color:var(--muted-foreground);margin-top:2px;">Your history will be saved</div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--muted-foreground);line-height:1.65;margin-bottom:24px;">
+      Your chat history will be <strong style="color:var(--foreground);">saved</strong> to this session ID. You can resume it anytime by entering the same session ID again.
+    </p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="hideCloseConfirm()" style="flex:1;padding:10px 16px;border-radius:9px;border:1.5px solid var(--border);background:white;color:var(--foreground);font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">Cancel</button>
+      <button onclick="doCloseSession()" style="flex:1;padding:10px 16px;border-radius:9px;border:none;background:linear-gradient(135deg,#6366f1,#3b82f6);color:white;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 10px rgba(99,102,241,0.35);transition:opacity 0.15s;" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">Save &amp; Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ END SESSION CONFIRM MODAL ══ -->
+<div id="end-confirm-overlay" onclick="hideEndConfirm()" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);align-items:center;justify-content:center;">
+  <div onclick="event.stopPropagation()" style="background:white;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.2);padding:32px 28px;max-width:400px;width:90%;animation:scaleIn 0.18s ease-out;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+      <div style="width:44px;height:44px;border-radius:12px;background:#fef2f2;color:#dc2626;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </div>
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#dc2626;font-family:'Outfit',sans-serif;">End Session?</div>
+        <div style="font-size:12px;color:#f87171;margin-top:2px;">This cannot be undone</div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--muted-foreground);line-height:1.65;margin-bottom:24px;">
+      Your entire chat history for this session will be <strong style="color:#dc2626;">permanently deleted</strong>. You will not be able to recover it.
+    </p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="hideEndConfirm()" style="flex:1;padding:10px 16px;border-radius:9px;border:1.5px solid var(--border);background:white;color:var(--foreground);font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='white'">Cancel</button>
+      <button onclick="doEndSession()" style="flex:1;padding:10px 16px;border-radius:9px;border:none;background:#dc2626;color:white;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 10px rgba(220,38,38,0.35);transition:opacity 0.15s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Yes, Delete &amp; End</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NEW: Download Modal ══ -->
+<div id="dl-modal-overlay" onclick="closeDlModal()">
+  <div class="dl-box" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <div style="width:40px;height:40px;border-radius:10px;background:hsl(221,83%,95%);color:var(--primary);display:flex;align-items:center;justify-content:center;">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--foreground);font-family:'Outfit',sans-serif;">Download Chat</div>
+        <div style="font-size:12px;color:var(--muted-foreground);">Choose format</div>
+      </div>
+    </div>
+    <button class="dl-btn" onclick="downloadChat('html')">
+      <svg width="18" height="18" fill="none" stroke="#6366f1" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+      <div>
+        <div>Download as HTML</div>
+        <div style="font-size:11px;font-weight:400;color:var(--muted-foreground);margin-top:1px;">Formatted chat with styling</div>
+      </div>
+    </button>
+    <button class="dl-btn" onclick="downloadChat('pdf')">
+      <svg width="18" height="18" fill="none" stroke="#ef4444" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      <div>
+        <div>Save as PDF</div>
+        <div style="font-size:11px;font-weight:400;color:var(--muted-foreground);margin-top:1px;">Opens print dialog → Save as PDF</div>
+      </div>
+    </button>
+    <button onclick="closeDlModal()" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:none;cursor:pointer;font-size:13px;color:var(--muted-foreground);margin-top:2px;" onmouseover="this.style.background='var(--muted)'" onmouseout="this.style.background='none'">Cancel</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/embedding_loader.js') }}"></script>
+<script src="{{ url_for('static', filename='js/preview.js') }}"></script>
+<script>
+const FILENAME = {{ filename | tojson }};
+const JOINED_FROM_HOME = {{ joined_from_home | tojson }};
+const FILE_AVAILABLE = {{ file_available | tojson }};
+const PRESET_SESSION_ID = {{ chat_session_id | tojson }};
+const CHAT_HISTORY = {{ chat_history | tojson }};
+let sessionId = null;
+let selectedModel = 'Balanced Model';
+let isTyping = false;
+let messageCount = 0;
+
+const MODEL_ICONS = {
+  'Fast Model':     '<svg width="13" height="13" fill="none" stroke="#eab308" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>',
+  'Balanced Model': '<svg width="13" height="13" fill="none" stroke="#3b82f6" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>',
+  'Advanced Model': '<svg width="13" height="13" fill="none" stroke="#9333ea" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>',
+};
+
+// ── Zoom ──
+let zoomLevel = 1.0;
+function zoomIn()    { zoomLevel = Math.min(+(zoomLevel + 0.15).toFixed(2), 3.0); applyZoom(); }
+function zoomOut()   { zoomLevel = Math.max(+(zoomLevel - 0.15).toFixed(2), 0.4); applyZoom(); }
+function resetZoom() { zoomLevel = 1.0; applyZoom(); }
+function applyZoom() {
+  document.getElementById('preview-area').style.zoom = zoomLevel;
+  document.getElementById('zoom-label').textContent = Math.round(zoomLevel * 100) + '%';
+}
+document.getElementById('preview-scroll-area').addEventListener('wheel', (e) => {
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); if (e.deltaY < 0) zoomIn(); else zoomOut(); }
+}, { passive: false });
+
+// ── Draggable Divider ──
+let isDragging = false, dragStartX = 0, dragStartWidth = 0, pendingX = null, rafId = null;
+const docPanel    = document.getElementById('doc-panel');
+const dragOverlay = document.getElementById('drag-overlay');
+const handleBar   = document.getElementById('drag-handle-bar');
+function startDrag(e) {
+  isDragging = true; dragStartX = e.clientX; dragStartWidth = docPanel.offsetWidth;
+  dragOverlay.style.display = 'block'; document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none'; handleBar.style.background = 'rgba(99,102,241,0.5)';
+  handleBar.style.height = '72px'; e.preventDefault();
+}
+function applyDrag() {
+  if (pendingX === null) { rafId = null; return; }
+  const totalW = document.getElementById('chat-layout').offsetWidth;
+  let newW = dragStartWidth + (pendingX - dragStartX);
+  newW = Math.max(280, Math.min(totalW * 0.78, newW));
+  docPanel.style.width = newW + 'px'; pendingX = null; rafId = null;
+}
+document.addEventListener('mousemove', (e) => { if (!isDragging) return; pendingX = e.clientX; if (!rafId) rafId = requestAnimationFrame(applyDrag); });
+document.addEventListener('mouseup', () => {
+  if (!isDragging) return; isDragging = false; dragOverlay.style.display = 'none';
+  document.body.style.cursor = ''; document.body.style.userSelect = '';
+  handleBar.style.background = 'rgba(100,116,139,0.25)'; handleBar.style.height = '48px';
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+});
+document.getElementById('drag-divider').addEventListener('mouseenter', () => { if (!isDragging) handleBar.style.background = 'rgba(99,102,241,0.3)'; });
+document.getElementById('drag-divider').addEventListener('mouseleave', () => { if (!isDragging) handleBar.style.background = 'rgba(100,116,139,0.25)'; });
+
+// ── Session Modal ──
+const sessionModal   = document.getElementById('session-modal');
+const sessionIdInput = document.getElementById('session-id-input');
+const checkBtn       = document.getElementById('check-session-btn');
+const step1Form      = document.getElementById('step1-form');
+const step2Form      = document.getElementById('step2-form');
+const startBtn       = document.getElementById('start-session-btn');
+const step1El        = document.getElementById('step-1');
+const step2El        = document.getElementById('step-2');
+let sessionIsExisting = false;
+
+function inputFocus(el) {
+  el.addEventListener('focus', () => { el.style.borderColor='var(--primary)'; el.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)'; });
+  el.addEventListener('blur',  () => { el.style.borderColor='var(--border)';  el.style.boxShadow='none'; });
+}
+inputFocus(sessionIdInput);
+inputFocus(document.getElementById('password-input'));
+inputFocus(document.getElementById('confirm-password-input'));
+
+sessionIdInput.addEventListener('input', () => {
+  checkBtn.disabled = !sessionIdInput.value.trim();
+  document.getElementById('step1-error').style.display = 'none';
+});
+
+function showStep1Error(msg) { const el=document.getElementById('step1-error'); el.textContent=msg; el.style.display='block'; }
+function showStep2Error(msg) { const el=document.getElementById('step2-error'); el.textContent=msg; el.style.display='block'; }
+function clearStep2Error()   { document.getElementById('step2-error').style.display='none'; }
+function goBackToStep1() {
+  step2El.style.display='none'; step1El.style.display='block';
+  document.getElementById('password-input').value=''; document.getElementById('confirm-password-input').value='';
+  clearStep2Error();
+}
+function togglePwdVisibility(inputId, iconId) {
+  const inp=document.getElementById(inputId), icon=document.getElementById(iconId);
+  if (inp.type==='password') { inp.type='text'; icon.innerHTML='<path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>'; }
+  else { inp.type='password'; icon.innerHTML='<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>'; }
+}
+
+step1Form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = sessionIdInput.value.trim(); if (!id) return;
+  checkBtn.disabled = true; checkBtn.innerHTML = 'Checking…';
+  try {
+    const res = await fetch('/api/session/check', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_id:id}) });
+    const data = await res.json();
+    if (!data.success) { showStep1Error(data.error||'Error checking session'); checkBtn.disabled=false; checkBtn.innerHTML='Continue <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>'; return; }
+    if (data.exists) {
+      const errEl=document.getElementById('step1-error');
+      errEl.innerHTML='<strong style="display:block;margin-bottom:4px;">Session ID already taken.</strong>Please choose a different name for a new session.<br>To access an existing session, go to the <a href="/" style="color:#2563eb;text-decoration:underline;font-weight:600;">home page</a> and use "Access Shared Session".';
+      errEl.style.display='block'; checkBtn.disabled=false; checkBtn.innerHTML='Continue <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>'; return;
+    }
+    sessionIsExisting=false; document.getElementById('session-id-display').textContent=id;
+    document.getElementById('existing-notice').style.display='none';
+    document.getElementById('step2-title').textContent='Set a Password';
+    document.getElementById('step2-subtitle').textContent='Create a password to protect this session.';
+    document.getElementById('confirm-pwd-wrap').style.display='block';
+    document.getElementById('step2-icon').style.background='hsl(221,83%,95%)';
+    document.getElementById('step2-icon').style.color='var(--primary)';
+    step1El.style.display='none'; step2El.style.display='block';
+    document.getElementById('password-input').focus();
+  } catch(err) { showStep1Error('Network error. Please try again.'); }
+  checkBtn.disabled=false; checkBtn.innerHTML='Continue <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
+});
+
+step2Form.addEventListener('submit', async (e) => {
+  e.preventDefault(); clearStep2Error();
+  const id=sessionIdInput.value.trim(), password=document.getElementById('password-input').value, confirm=document.getElementById('confirm-password-input').value;
+  if (!password) { showStep2Error('Please enter a password.'); return; }
+  if (!sessionIsExisting) {
+    if (password.length<4) { showStep2Error('Password must be at least 4 characters.'); return; }
+    if (password!==confirm) { showStep2Error('Passwords do not match. Please re-enter.'); return; }
+  }
+  startBtn.disabled=true; startBtn.innerHTML='Starting…';
+  showEmbeddingLoader();
+  try {
+    const res=await fetch('/api/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:id,password})});
+    const data=await res.json();
+    if (data.success) {
+      notifyEmbeddingDone(function() {
+        sessionId=id; sessionModal.style.display='none';
+        activateChat(data.message,id,data.history||[]);
+        startBtn.disabled=false; startBtn.innerHTML='Start Session <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
+      });
+    } else {
+      hideEmbeddingLoader(); showStep2Error(data.error||'Failed to start session.');
+      startBtn.disabled=false; startBtn.innerHTML='Start Session <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
+    }
+  } catch(err) {
+    hideEmbeddingLoader(); showStep2Error('Network error. Please try again.');
+    startBtn.disabled=false; startBtn.innerHTML='Start Session <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
+  }
+});
+
+function enableControls() {
+  document.getElementById('chat-input').disabled = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('model-btn').disabled = false;
+  document.getElementById('status-dot').style.background = '#22c55e';
+  document.getElementById('status-text').textContent = 'Active session';
+  const badge = document.getElementById('session-badge');
+  badge.classList.remove('hidden');
+  document.getElementById('session-badge-text').textContent = 'Session: ' + sessionId;
+  const endBtn = document.getElementById('end-session-btn');
+  endBtn.disabled = false; endBtn.style.opacity = '1';
+  const sb = document.getElementById('search-toggle-btn');
+  sb.disabled = false; sb.style.opacity = '1';
+  const db = document.getElementById('download-chat-btn');
+  db.disabled = false; db.style.opacity = '1';
+}
+
+function activateChat(firstMessage, id, history) {
+  sessionId = id;
+  enableControls();
+  if (history && history.length > 0) history.forEach(msg => {
+    const ts = fmtTimestamp(msg.timestamp);
+    appendMessage(msg.role, msg.content, !ts, ts);
+  });
+  setTimeout(() => appendMessage('ai', firstMessage), 400);
+}
+
+// ── End Session Dropdown ──
+function toggleEndDropdown(e) {
+  e.stopPropagation();
+  const menu=document.getElementById('end-dropdown-menu'), overlay=document.getElementById('end-dropdown-overlay'), btn=document.getElementById('end-session-btn');
+  if (menu.style.display==='block') { closeEndDropdown(); }
+  else { const rect=btn.getBoundingClientRect(); menu.style.right=(window.innerWidth-rect.right)+'px'; menu.style.top=(rect.bottom+6)+'px'; menu.style.left='auto'; menu.style.display='block'; overlay.style.display='block'; }
+}
+function closeEndDropdown() { document.getElementById('end-dropdown-menu').style.display='none'; document.getElementById('end-dropdown-overlay').style.display='none'; }
+function showModal(id) { document.getElementById(id).style.display='flex'; }
+function hideModal(id) { document.getElementById(id).style.display='none'; }
+function closeSession() { closeEndDropdown(); showModal('close-confirm-overlay'); }
+function hideCloseConfirm() { hideModal('close-confirm-overlay'); }
+async function doCloseSession() { hideCloseConfirm(); try { const res=await fetch('/api/session/close',{method:'POST'}); const data=await res.json(); if(data.success)window.location.href=data.redirect; } catch { window.location.href='/'; } }
+function endSession() { closeEndDropdown(); showModal('end-confirm-overlay'); }
+function hideEndConfirm() { hideModal('end-confirm-overlay'); }
+async function doEndSession() { hideEndConfirm(); try { const res=await fetch('/api/session/end',{method:'POST'}); const data=await res.json(); if(data.success)window.location.href=data.redirect; } catch { window.location.href='/'; } }
+
+// ── Model Dropdown ──
+let dropdownOpen = false;
+function positionDropdown() { const btn=document.getElementById('model-btn'),menu=document.getElementById('model-dropdown-menu'),rect=btn.getBoundingClientRect(); menu.style.left=rect.left+'px'; menu.style.bottom=(window.innerHeight-rect.top+6)+'px'; menu.style.top='auto'; }
+function toggleDropdown(e) { e.stopPropagation(); dropdownOpen=!dropdownOpen; const menu=document.getElementById('model-dropdown-menu'); if(dropdownOpen){positionDropdown();menu.style.display='block';}else{menu.style.display='none';} }
+function selectModel(el) {
+  selectedModel=el.dataset.model; document.getElementById('model-label').textContent=selectedModel; document.getElementById('model-icon').innerHTML=MODEL_ICONS[selectedModel];
+  document.querySelectorAll('.model-opt').forEach(opt => { const check=opt.querySelector('.model-check'),sel=opt.dataset.model===selectedModel; opt.classList.toggle('selected',sel); if(check)check.style.display=sel?'block':'none'; opt.style.background=sel?'hsl(214,32%,97%)':'transparent'; opt.onmouseout=()=>{opt.style.background=opt.classList.contains('selected')?'hsl(214,32%,97%)':'transparent';}; });
+  document.getElementById('model-dropdown-menu').style.display='none'; dropdownOpen=false;
+}
+document.addEventListener('click', (e) => { if (!document.getElementById('model-btn').contains(e.target)) { document.getElementById('model-dropdown-menu').style.display='none'; dropdownOpen=false; } });
+
+// ── Messages ──
+function fmtTime() { return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+
+function fmtTimestamp(ts) {
+  if (!ts) return null;
+  try {
+    // ISO UTC string from server e.g. "2026-03-20T04:35:22.123456"
+    // If no timezone info, treat as UTC by appending Z
+    const str = ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z';
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  } catch(e) { return null; }
+}
+
+function appendMessage(role, content, skipTime, existingTime) {
+  const area = document.getElementById('messages-area');
+  const emptyState = document.getElementById('empty-state');
+  if (emptyState && messageCount === 0) emptyState.remove();
+  messageCount++;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.style.cssText = 'display:flex;gap:10px;' + (role==='user' ? 'flex-direction:row-reverse;' : '');
+
+  const aiAvatar = `<div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6366f1,#3b82f6);color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/></svg></div>`;
+  const userAvatar = `<div style="width:30px;height:30px;border-radius:9px;background:var(--secondary);color:var(--secondary-foreground);display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></div>`;
+
+  // Render: AI = markdown, User = plain escaped text
+  const rendered = role === 'ai' ? renderMarkdown(content) : escapeHtml(content);
+  const timeHtml = skipTime ? '' : `<span class="msg-time" style="${role==='user'?'text-align:right;':'text-align:left;'}">${existingTime || fmtTime()}</span>`;
+  const copyHtml = `<button class="copy-btn" onclick="copyMsg(this)" title="Copy"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy</button>`;
+
+  const bubbleStyle = role === 'ai'
+    ? 'word-break:break-word;overflow-wrap:anywhere;width:fit-content;max-width:100%;'
+    : 'word-break:break-word;overflow-wrap:anywhere;white-space:pre-wrap;width:fit-content;max-width:100%;';
+
+  wrap.innerHTML = (role==='ai' ? aiAvatar : userAvatar) +
+    `<div style="display:flex;flex-direction:column;${role==='user'?'align-items:flex-end;':'align-items:flex-start;'}max-width:85%;min-width:0;">
+       <div class="${role==='user'?'msg-user':'msg-ai'} msg-content${role==='ai'?' md':''}" style="${bubbleStyle}" data-plain="${content.replace(/"/g,'&quot;')}">${rendered}</div>
+       ${timeHtml}
+       ${copyHtml}
+     </div>`;
+
+  area.appendChild(wrap);
+  area.scrollTop = area.scrollHeight;
+}
+
+// ── Copy ──
+function copyMsg(btn) {
+  const wrap = btn.closest('.msg-wrap');
+  const contentEl = wrap ? wrap.querySelector('.msg-content') : null;
+  const txt = (contentEl && contentEl.dataset.plain)
+    ? contentEl.dataset.plain
+    : (contentEl ? (contentEl.innerText || contentEl.textContent || '') : '');
+  if (!txt || !txt.trim()) return;
+
+  function markCopied() {
+    btn.classList.add('copied');
+    btn.innerHTML = '<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg> Copied!';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = '<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy';
+    }, 2000);
+  }
+
+  function fallbackCopy() {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); markCopied(); }
+    catch(e) { console.warn('Copy failed:', e); }
+    document.body.removeChild(ta);
+  }
+
+  // Try modern clipboard API first, fallback to execCommand
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(txt).then(markCopied).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+// ── Typing indicator ──
+function showTypingIndicator() {
+  const area = document.getElementById('messages-area');
+  const el = document.createElement('div');
+  el.id = 'typing-indicator';
+  el.style.cssText = 'display:flex;gap:10px;align-items:flex-start;';
+  el.innerHTML = `
+    <div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6366f1,#3b82f6);color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/></svg>
+    </div>
+    <div class="msg-ai" style="display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+      </div>
+      <div class="typing-step-text" style="font-size:11px;color:var(--muted-foreground);opacity:0.8;transition:opacity 0.2s;">🔍 Understanding your question...</div>
+    </div>`;
+  area.appendChild(el);
+  area.scrollTop = area.scrollHeight;
+}
+function removeTypingIndicator() { const el=document.getElementById('typing-indicator'); if(el)el.remove(); }
+
+// ── Smooth Typewriter Streaming ──
+// Token queue: tokens aate hain network se, renderer ek smooth speed pe render karta hai
+let _streamQueue   = [];   // pending characters to render
+let _streamBubble  = null; // current bubble wrap element
+let _streamRawText = '';   // full plain text so far
+let _streamDone    = false;// network done flag
+let _streamRAF     = null; // requestAnimationFrame id
+const CHARS_PER_FRAME = 3; // kitne chars per frame render karo (speed control)
+
+function _startStreamRenderer() {
+  if (_streamRAF) return; // already running
+  function tick() {
+    if (_streamQueue.length > 0) {
+      // Render up to CHARS_PER_FRAME chars this frame
+      const batch = _streamQueue.splice(0, CHARS_PER_FRAME).join('');
+      _streamRawText += batch;
+      _renderStreamBubble();
+    }
+    // Keep running if queue has items OR network not done yet
+    if (_streamQueue.length > 0 || !_streamDone) {
+      _streamRAF = requestAnimationFrame(tick);
+    } else {
+      // Queue empty + network done = finalize
+      _streamRAF = null;
+      if (_streamBubble) _finalizeStream();
+    }
+  }
+  _streamRAF = requestAnimationFrame(tick);
+}
+
+function _renderStreamBubble() {
+  if (!_streamBubble) return;
+  const bubble = _streamBubble.querySelector('.stream-content');
+  if (!bubble) return;
+  bubble.innerHTML = escapeHtml(_streamRawText);
+  const area = document.getElementById('messages-area');
+  area.scrollTop = area.scrollHeight;
+}
+
+function _finalizeStream() {
+  if (!_streamBubble) return;
+  const bubble = _streamBubble.querySelector('.stream-content');
+  if (bubble) {
+    // Remove cursor and set final text
+    bubble.innerHTML = renderMarkdown(_streamRawText);
+    bubble.dataset.plain = _streamRawText;
+    bubble.classList.add('md');
+    bubble.style.whiteSpace = '';
+  }
+  const inner = _streamBubble.querySelector('.stream-inner');
+  if (inner) {
+    inner.innerHTML += `
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span class="msg-time" style="text-align:left;">${fmtTime()}</span>
+        <button class="copy-btn" onclick="copyMsg(this)" title="Copy">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Copy
+        </button>
+      </div>`;
+  }
+  _streamBubble  = null;
+  _streamRawText = '';
+  _streamQueue   = [];
+  _streamDone    = false;
+}
+
+function _resetStream() {
+  if (_streamRAF) { cancelAnimationFrame(_streamRAF); _streamRAF = null; }
+  _streamQueue   = [];
+  _streamRawText = '';
+  _streamDone    = false;
+  _streamBubble  = null;
+}
+
+async function sendMessage(e) {
+  e.preventDefault();
+  const input = document.getElementById('chat-input');
+  const question = input.value.trim();
+  if (!question || !sessionId || isTyping) return;
+  input.value = ''; input.style.height = '';
+  isTyping = true; document.getElementById('send-btn').disabled = true;
+  appendMessage('user', question);
+  showTypingIndicator();
+  _resetStream();
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, model: selectedModel, session_id: sessionId })
+    });
+
+    if (!res.ok) throw new Error('Server error');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        try {
+          const payload = JSON.parse(raw);
+
+          if (payload.type === 'thinking') {
+            updateTypingStep(payload.text);
+
+          } else if (payload.type === 'token') {
+            // First token — remove typing indicator, create bubble
+            if (!_streamBubble) {
+              removeTypingIndicator();
+              _streamBubble = createStreamingBubble();
+              _startStreamRenderer();
+            }
+            // Push each character into queue for smooth rendering
+            _streamQueue.push(...payload.text.split(''));
+
+          } else if (payload.type === 'done') {
+            _streamDone = true;
+            // If no bubble yet (empty response), handle gracefully
+            if (!_streamBubble && payload.full_text) {
+              removeTypingIndicator();
+              appendMessage('ai', payload.full_text);
+            }
+
+          } else if (payload.type === 'error') {
+            _streamDone = true;
+            removeTypingIndicator();
+            if (_streamBubble) {
+              _streamQueue.push(...payload.text.split(''));
+            } else {
+              appendMessage('ai', payload.text);
+            }
+          }
+        } catch(pe) { /* skip bad json */ }
+      }
+    }
+
+    // Network read complete — mark done so renderer can finalize
+    _streamDone = true;
+
+  } catch(err) {
+    _streamDone = true;
+    removeTypingIndicator();
+    if (_streamBubble) {
+      _streamQueue.push(...'Network error. Please check your connection.'.split(''));
+    } else {
+      appendMessage('ai', 'Network error. Please check your connection.');
+    }
+  }
+
+  isTyping = false; document.getElementById('send-btn').disabled = false; input.focus();
+}
+
+// ── Typing indicator with live step text ──
+function updateTypingStep(text) {
+  const el = document.getElementById('typing-indicator');
+  if (!el) return;
+  const stepEl = el.querySelector('.typing-step-text');
+  if (stepEl) {
+    stepEl.style.opacity = '0';
+    setTimeout(() => { stepEl.textContent = text; stepEl.style.opacity = '1'; }, 150);
+  }
+}
+
+// ── Create empty streaming bubble ──
+function createStreamingBubble() {
+  const area = document.getElementById('messages-area');
+  const emptyState = document.getElementById('empty-state');
+  if (emptyState && messageCount === 0) emptyState.remove();
+  messageCount++;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.style.cssText = 'display:flex;gap:10px;';
+
+  const aiAvatar = `<div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6366f1,#3b82f6);color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/></svg></div>`;
+
+  wrap.innerHTML = aiAvatar + `
+    <div class="stream-inner" style="display:flex;flex-direction:column;align-items:flex-start;max-width:85%;min-width:0;">
+      <div class="msg-ai msg-content stream-content" style="word-break:break-word;overflow-wrap:anywhere;width:fit-content;max-width:100%;"></div>
+    </div>`;
+
+  area.appendChild(wrap);
+  area.scrollTop = area.scrollHeight;
+  return wrap;
+}
+
+function handleKeydown(e) { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); sendMessage(e); } }
+function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; }
+function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+
+// ── Markdown → HTML (for AI messages only) ──
+function renderMarkdown(text) {
+  const inline = s => s
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/`([^`]+)`/g,'<code style="background:hsl(220,14%,93%);border-radius:4px;padding:1px 6px;font-size:12px;font-family:monospace;color:#6366f1;font-weight:500;">$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong style="font-weight:700;color:#1e293b;">$1</strong>')
+    .replace(/__(.+?)__/g,'<strong style="font-weight:700;color:#1e293b;">$1</strong>');
+
+  const lines = text.split('\n');
+  let html='', inUL=false, ulDepth=0, inOL=false, inTable=false, tableRows=[];
+
+  const closeUL = () => { while(ulDepth>0){html+='</ul>';ulDepth--;} if(inUL){html+='</ul>';inUL=false;} };
+  const closeOL = () => { if(inOL){html+='</ol>';inOL=false;} };
+  const flushTable = () => {
+    if(!inTable||!tableRows.length) return;
+    let t='<div style="overflow-x:auto;margin:10px 0;"><table style="border-collapse:collapse;width:100%;font-size:13px;line-height:1.5;">';
+    let headerDone=false;
+    tableRows.forEach(row=>{
+      const cells=row.split('|').map(c=>c.trim()).filter((_,i,a)=>i>0&&i<a.length-1);
+      if(!cells.length) return;
+      if(cells.every(c=>/^[-: ]+$/.test(c))){headerDone=true;return;}
+      const isH=!headerDone, tag=isH?'th':'td';
+      const st=isH?'background:hsl(221,83%,95%);color:#3b82f6;font-weight:700;padding:8px 14px;border:1px solid hsl(214,32%,88%);text-align:left;'
+                  :'padding:7px 14px;border:1px solid hsl(214,32%,91%);color:#334155;vertical-align:top;';
+      t+='<tr>'+cells.map(c=>`<${tag} style="${st}">${inline(c)}</${tag}>`).join('')+'</tr>';
+    });
+    t+='</table></div>';
+    html+=t; inTable=false; tableRows=[];
+  };
+  const closeAll=()=>{closeUL();closeOL();flushTable();};
+
+  for(const line of lines){
+    if(/^\|.+\|/.test(line)){closeUL();closeOL();inTable=true;tableRows.push(line);continue;}
+    else flushTable();
+
+    if(/^# [^#]/.test(line)){closeAll();html+=`<p style="font-size:16px;font-weight:700;color:#0f172a;margin:14px 0 6px;font-family:'Outfit',sans-serif;border-bottom:1px solid hsl(214,32%,91%);padding-bottom:4px;">${inline(line.slice(2))}</p>`;continue;}
+    if(/^## /.test(line)){closeAll();html+=`<p style="font-size:14px;font-weight:700;color:#1e293b;margin:12px 0 5px;font-family:'Outfit',sans-serif;">${inline(line.slice(3))}</p>`;continue;}
+    if(/^### /.test(line)){closeAll();html+=`<p style="font-size:13px;font-weight:700;color:#334155;margin:10px 0 4px;">${inline(line.slice(4))}</p>`;continue;}
+    if(/^---+$/.test(line.trim())){closeAll();html+='<hr style="border:none;border-top:1px solid hsl(214,32%,91%);margin:10px 0;">';continue;}
+
+    const ulM=line.match(/^(  |\t)?[*-] (.+)/);
+    if(ulM){
+      closeOL();
+      const nested=ulM[1]!==undefined;
+      if(!inUL){html+='<ul style="margin:5px 0 8px;padding-left:0;list-style:none;">';inUL=true;ulDepth=0;}
+      if(nested&&ulDepth===0){html+='<ul style="margin:3px 0 3px;padding-left:14px;list-style:none;">';ulDepth=1;}
+      else if(!nested&&ulDepth===1){html+='</ul>';ulDepth=0;}
+      const icon=ulDepth===0
+        ?'<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#6366f1;margin-right:9px;margin-bottom:1px;flex-shrink:0;margin-left:4px;"></span>'
+        :'<span style="display:inline-block;width:14px;text-align:center;color:#94a3b8;margin-right:6px;flex-shrink:0;">–</span>';
+      html+=`<li style="display:flex;align-items:baseline;margin-bottom:5px;line-height:1.6;">${icon}<span>${inline(ulM[2])}</span></li>`;
+      continue;
+    }
+
+    const olM=line.match(/^\d+\. (.+)/);
+    if(olM){
+      closeUL();
+      if(!inOL){html+='<ol style="margin:5px 0 8px;padding-left:22px;">';inOL=true;}
+      html+=`<li style="margin-bottom:5px;line-height:1.6;">${inline(olM[1])}</li>`;
+      continue;
+    }
+
+    if(line.trim()===''){closeAll();continue;}
+    closeAll();
+    html+=`<p style="margin:0 0 7px;line-height:1.7;">${inline(line)}</p>`;
+  }
+
+  closeAll();
+  return html||`<p style="margin:0;line-height:1.7;">${inline(text)}</p>`;
+}
+
+
+// ── Search ──
+let srchMatches=[], srchIdx=-1;
+
+function toggleSearch() {
+  const bar=document.getElementById('search-bar');
+  bar.classList.toggle('open');
+  if (bar.classList.contains('open')) document.getElementById('search-input').focus();
+  else closeSearch();
+}
+function closeSearch() {
+  document.getElementById('search-bar').classList.remove('open');
+  document.getElementById('search-input').value='';
+  clearHighlights(); srchMatches=[]; srchIdx=-1;
+  document.getElementById('search-count').textContent='';
+}
+function clearHighlights() {
+  document.querySelectorAll('.msg-content').forEach(el => {
+    el.innerHTML = el.innerHTML.replace(/<mark class="msg-highlight[^"]*">(.*?)<\/mark>/gi,'$1');
+  });
+}
+function doSearch(q) {
+  clearHighlights(); srchMatches=[]; srchIdx=-1;
+  if (!q.trim()) { document.getElementById('search-count').textContent=''; return; }
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  document.querySelectorAll('.msg-content').forEach(el => {
+    const orig=el.innerHTML, hi=orig.replace(re, m=>`<mark class="msg-highlight">${m}</mark>`);
+    if (hi!==orig) { el.innerHTML=hi; srchMatches.push(...el.querySelectorAll('.msg-highlight')); }
+  });
+  document.getElementById('search-count').textContent = srchMatches.length ? `${srchMatches.length} found` : 'Not found';
+  if (srchMatches.length) { srchIdx=0; highlightCurrent(); }
+}
+function highlightCurrent() {
+  srchMatches.forEach((m,i)=>{ m.className = i===srchIdx ? 'msg-highlight current' : 'msg-highlight'; });
+  if (srchMatches[srchIdx]) { srchMatches[srchIdx].scrollIntoView({behavior:'smooth',block:'center'}); document.getElementById('search-count').textContent=`${srchIdx+1} / ${srchMatches.length}`; }
+}
+function searchNav(d) { if (!srchMatches.length) return; srchIdx=(srchIdx+d+srchMatches.length)%srchMatches.length; highlightCurrent(); }
+function searchKey(e) { if(e.key==='Enter'){e.shiftKey?searchNav(-1):searchNav(1);} if(e.key==='Escape')closeSearch(); }
+document.addEventListener('keydown', e => { if((e.ctrlKey||e.metaKey)&&e.key==='f'&&sessionId){e.preventDefault();toggleSearch();} });
+
+// ── Download ──
+function openDlModal()  { document.getElementById('dl-modal-overlay').classList.add('open'); }
+function closeDlModal() { document.getElementById('dl-modal-overlay').classList.remove('open'); setTimeout(()=>{ window.focus(); if(sessionId) document.getElementById('chat-input').focus(); },50); }
+
+function downloadChat(fmt) {
+  closeDlModal();
+  const msgs=[];
+  document.querySelectorAll('.msg-wrap').forEach(wrap => {
+    const isUser = wrap.style.flexDirection==='row-reverse';
+    const c = wrap.querySelector('.msg-content');
+    const t = wrap.querySelector('.msg-time');
+    if (c) msgs.push({ role: isUser?'You':'AI Assistant', text: c.dataset.plain||c.innerText, time: t?t.textContent:'' });
+  });
+  if (!msgs.length) { alert('No messages yet.'); return; }
+  const sl=sessionId||'session', ds=new Date().toLocaleDateString();
+
+  // Build HTML string (used for both html download and pdf print)
+  function buildHtml() {
+    let h=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Chat — ${FILENAME}</title><style>
+      body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;color:#1e293b;}
+      h1{font-size:17px;margin-bottom:4px;font-family:Arial,sans-serif;}
+      .meta{font-size:12px;color:#64748b;margin-bottom:20px;}
+      hr{border:none;border-top:1px solid #e2e8f0;margin:16px 0;}
+      .msg{margin-bottom:16px;}
+      .role{font-size:11px;font-weight:700;text-transform:uppercase;margin-bottom:3px;letter-spacing:0.05em;}
+      .ai{color:#6366f1;}.user{color:#0ea5e9;}
+      .bubble{padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}
+      .bubble.ai{background:#f1f5f9;}.bubble.user{background:#eff6ff;}
+      .t{font-size:10px;color:#94a3b8;margin-top:4px;}
+      @media print { body{margin:20px;} }
+    </style></head><body>`;
+    h+=`<h1>Chat — ${FILENAME}</h1><div class="meta">Session: ${sl} | ${ds}</div><hr>`;
+    msgs.forEach(m=>{
+      const ia=m.role==='AI Assistant';
+      const safeText=m.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      h+=`<div class="msg"><div class="role ${ia?'ai':'user'}">${m.role}${m.time?' <span style="font-weight:400;color:#94a3b8;">'+ m.time +'</span>':''}</div><div class="bubble ${ia?'ai':'user'}">${safeText}</div></div>`;
+    });
+    h+=`</body></html>`;
+    return h;
+  }
+
+  if (fmt==='html') {
+    triggerDownload(new Blob([buildHtml()],{type:'text/html'}), `chat_${sl}.html`);
+  } else if (fmt==='pdf') {
+    // html2pdf.js se direct PDF download
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:760px;';
+    container.innerHTML = buildHtml();
+    document.body.appendChild(container);
+
+    // html2pdf library load hone ka wait karo
+    function doPdfDownload() {
+      html2pdf()
+        .set({
+          margin:        [12, 14, 12, 14],
+          filename:      `chat_${sl}.pdf`,
+          image:         { type: 'jpeg', quality: 0.98 },
+          html2canvas:   { scale: 2, useCORS: true, logging: false },
+          jsPDF:         { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak:     { mode: ['avoid-all', 'css'] }
+        })
+        .from(container.querySelector('body') || container)
+        .save()
+        .then(() => { document.body.removeChild(container); })
+        .catch(() => {
+          document.body.removeChild(container);
+          // Fallback: HTML download
+          triggerDownload(new Blob([buildHtml()],{type:'text/html'}), `chat_${sl}.html`);
+        });
+    }
+
+    if (typeof html2pdf !== 'undefined') {
+      doPdfDownload();
+    } else {
+      // Load library dynamically agar pehle load nahi hua
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.onload = doPdfDownload;
+      script.onerror = () => {
+        document.body.removeChild(container);
+        triggerDownload(new Blob([buildHtml()],{type:'text/html'}), `chat_${sl}.html`);
+      };
+      document.head.appendChild(script);
+    }
+  }
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── File Preview ──
+if (FILE_AVAILABLE) {
+  initSmartPreview('preview-area', '/api/preview-file', FILENAME);
+} else {
+  document.getElementById('preview-area').innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:2.5rem 2rem;text-align:center;gap:1.5rem;">
+      <div style="width:64px;height:64px;border-radius:1rem;display:flex;align-items:center;justify-content:center;background:hsl(0,86%,97%);color:#dc2626;flex-shrink:0;">
+        <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      </div>
+      <div>
+        <h3 style="font-size:1.1rem;font-weight:700;color:var(--foreground);margin-bottom:0.5rem;font-family:'Outfit',sans-serif;">File No Longer Available</h3>
+        <p style="font-size:0.875rem;color:var(--muted-foreground);line-height:1.6;max-width:340px;">
+          Sorry, the original file <strong style="color:var(--foreground);">"${FILENAME}"</strong> is no longer available on this server.
+          File previews are only available during the active session in which the file was uploaded.
+        </p>
+        <p style="font-size:0.8rem;color:var(--muted-foreground);margin-top:0.75rem;line-height:1.5;">
+          You can still continue the chat conversation using the session history.
+        </p>
+      </div>
+      <div style="padding:0.75rem 1.25rem;border-radius:0.75rem;background:hsl(214,32%,96%);border:1px solid var(--border);font-size:0.8rem;color:var(--muted-foreground);max-width:320px;">
+        <span style="font-weight:600;color:var(--foreground);">Tip:</span> To use file previews, upload the document again from the home page and create a new session.
+      </div>
+    </div>`;
+}
+
+// ── Auto-activate if joined from home ──
+if (JOINED_FROM_HOME && PRESET_SESSION_ID) {
+  document.getElementById('session-modal').style.display='none';
+  sessionId = PRESET_SESSION_ID;
+  enableControls();
+  if (CHAT_HISTORY && CHAT_HISTORY.length > 0) {
+    CHAT_HISTORY.forEach(msg => {
+      const ts = fmtTimestamp(msg.timestamp);
+      appendMessage(msg.role, msg.content, !ts, ts);
+    });
+  } else {
+    const es=document.getElementById('empty-state'); if(es)es.style.display='flex';
+  }
+}
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+{% endblock %}

@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% block title %}AI Document Query - Upload{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-background relative overflow-hidden flex flex-col">
+
+  <!-- Neon animated background -->
+  <div class="neon-bg">
+    <div class="neon-orb neon-orb-1"></div>
+    <div class="neon-orb neon-orb-2"></div>
+    <div class="neon-orb neon-orb-3"></div>
+    <div class="neon-orb neon-orb-4"></div>
+    <div class="bubble bubble-1"></div>
+    <div class="bubble bubble-2"></div>
+    <div class="bubble bubble-3"></div>
+    <div class="bubble bubble-4"></div>
+    <div class="bubble bubble-5"></div>
+    <div class="bubble bubble-6"></div>
+    <div class="absolute inset-0 bg-background/60"></div>
+  </div>
+
+  <div class="relative z-10 container mx-auto px-4 sm:px-6 lg:px-8 py-16 flex-1 flex flex-col items-center">
+
+    <!-- Header Section -->
+    <div class="text-center max-w-3xl mx-auto mt-8 mb-12 animate-fadeInUp">
+      <div class="inline-flex items-center justify-center px-4 py-1.5 mb-6 rounded-full badge badge-primary">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+        </svg>
+        AI Document Intelligence
+      </div>
+      <h1 class="text-4xl md:text-5xl lg:text-6xl font-bold text-foreground leading-tight mb-6" style="font-family:'Outfit',sans-serif;">
+        Get instant answers from your documents with AI
+      </h1>
+      <p class="text-lg md:text-xl text-muted-foreground leading-relaxed">
+        Upload your document and ask questions to instantly extract information.
+      </p>
+    </div>
+
+    <!-- Upload + Join Session row -->
+    <div class="w-full max-w-5xl mb-12 animate-fadeInUp grid grid-cols-1 md:grid-cols-2 gap-6 items-start" style="animation-delay:0.15s;">
+
+      <!-- Upload Box -->
+      <div class="card p-6 shadow-lg">
+        <div id="dropzone" class="dropzone" onclick="document.getElementById('file-input').click()">
+          <div class="flex flex-col items-center gap-4">
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-primary" style="background:hsl(221,83%,95%);">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <div>
+              <p class="text-lg font-semibold text-foreground mb-1">Drop your document here</p>
+              <p class="text-sm text-muted-foreground">or <span class="text-primary font-medium cursor-pointer underline-offset-2 hover:underline">browse files</span></p>
+            </div>
+            <div id="upload-filename" class="hidden items-center gap-2 px-4 py-2 bg-muted rounded-lg text-sm text-foreground font-medium">
+              <svg class="w-4 h-4 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span id="filename-text"></span>
+            </div>
+          </div>
+          <input type="file" id="file-input" class="hidden"
+                 accept=".pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.bmp,.ppt,.pptx" />
+        </div>
+
+        <!-- Upload progress bar (hidden initially) -->
+        <div id="upload-progress" class="hidden mt-4">
+          <div class="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div id="progress-bar" class="h-full bg-primary rounded-full transition-all duration-300" style="width:0%"></div>
+          </div>
+          <p class="text-xs text-muted-foreground mt-2 text-center">Uploading...</p>
+        </div>
+
+        <!-- Error message -->
+        <div id="upload-error" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"></div>
+
+        <!-- Upload button -->
+        <div class="flex justify-center mt-5">
+          <button id="upload-btn" class="btn btn-primary btn-lg hidden gap-2" onclick="uploadFile()">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            Upload Document
+          </button>
+        </div>
+
+        <!-- Supported formats -->
+        <p class="text-xs text-muted-foreground text-center mt-4 mb-3">Supported formats:</p>
+        <div class="flex flex-wrap justify-center gap-2">
+          {% for fmt in ['PDF', 'DOCX', 'PPT', 'PPTX', 'TXT', 'MD', 'CSV', 'XLSX', 'PNG', 'JPG', 'WEBP', 'BMP'] %}
+          <span class="px-2.5 py-1 rounded-md text-xs font-medium" style="background:var(--secondary);color:var(--secondary-foreground);">{{ fmt }}</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Access Shared Session Card -->
+      <div class="card p-6 shadow-lg">
+        <div class="flex items-center gap-3 mb-5">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:hsl(262,83%,95%);color:hsl(262,72%,53%);">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-foreground leading-tight">Access Shared Session</h2>
+            <p class="text-xs text-muted-foreground mt-0.5">Join an existing session without uploading a document</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-muted-foreground mb-1.5 tracking-wide uppercase">Session ID</label>
+          <input id="join-session-id" type="text" autocomplete="off"
+                 placeholder="e.g. my-research-session"
+                 style="width:100%;padding:0.8rem 1rem;border-radius:0.65rem;border:1.5px solid var(--border);background:hsl(214,32%,97%);color:var(--foreground);font-size:0.9rem;font-weight:500;outline:none;transition:border 0.2s,box-shadow 0.2s;box-sizing:border-box;margin-bottom:1rem;" />
+
+          <label class="block text-xs font-semibold text-muted-foreground mb-1.5 tracking-wide uppercase">Password</label>
+          <div style="position:relative;margin-bottom:1.25rem;">
+            <input id="join-password" type="password" autocomplete="current-password"
+                   placeholder="Enter session password"
+                   style="width:100%;padding:0.8rem 2.8rem 0.8rem 1rem;border-radius:0.65rem;border:1.5px solid var(--border);background:hsl(214,32%,97%);color:var(--foreground);font-size:0.9rem;font-weight:500;outline:none;transition:border 0.2s,box-shadow 0.2s;box-sizing:border-box;" />
+            <button type="button" onclick="toggleJoinPassword()"
+                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted-foreground);padding:4px;">
+              <svg id="join-eye-icon" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Error display -->
+          <div id="join-error" class="hidden mb-3 p-3 rounded-xl text-sm font-medium" style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;"></div>
+
+          <button id="join-btn" onclick="joinSession()"
+                  class="w-full btn-lg gap-2"
+                  style="display:flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.85rem 1.5rem;border-radius:0.75rem;border:none;background:hsl(262,72%,53%);color:white;font-size:1rem;font-weight:600;cursor:pointer;transition:background 0.18s,box-shadow 0.18s;font-family:'Outfit',sans-serif;"
+                  onmouseover="this.style.background='hsl(262,72%,44%)'" onmouseout="this.style.background='hsl(262,72%,53%)'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+            </svg>
+            Join Session
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- How it works section -->
+    <div class="w-full max-w-6xl mx-auto animate-fadeIn" style="animation-delay:0.3s;">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl font-bold text-foreground mb-4">How the AI understands your document</h2>
+        <div class="w-24 h-1 mx-auto rounded-full" style="background:hsl(221,83%,85%);"></div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-6 relative">
+        <!-- Flow line for desktop -->
+        <div class="hidden md:block absolute top-[52px] left-[10%] right-[10%] h-px -z-10"
+             style="background:linear-gradient(to right, transparent, var(--border), transparent);"></div>
+
+        {% set steps = [
+          ('M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12', 'Upload Document', 'User uploads a document. The system reads and prepares it.'),
+          ('M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2', 'Document Chunking', 'Divided into smaller text chunks for efficient processing.'),
+          ('M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4', 'Embedding Generation', 'Converted into vector embeddings for semantic understanding.'),
+          ('M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', 'Vector Search', 'System finds the most relevant chunks for your question.'),
+          ('M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z', 'AI Answer Generation', 'AI uses retrieved context to generate accurate answers.'),
+        ] %}
+        {% for icon_path, title, desc in steps %}
+        <div class="step-card">
+          <div class="step-icon">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon_path }}"/>
+            </svg>
+          </div>
+          <div class="text-xs font-bold tracking-wider text-primary mb-2 uppercase">Step {{ loop.index }}</div>
+          <h4 class="text-base font-bold text-foreground mb-2 leading-tight">{{ title }}</h4>
+          <p class="text-sm text-muted-foreground leading-relaxed">{{ desc }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+const uploadBtn = document.getElementById('upload-btn');
+const filenameDisplay = document.getElementById('upload-filename');
+const filenameText = document.getElementById('filename-text');
+const uploadError = document.getElementById('upload-error');
+const uploadProgress = document.getElementById('upload-progress');
+const progressBar = document.getElementById('progress-bar');
+
+let selectedFile = null;
+
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('dragging');
+});
+dropzone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragging');
+});
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragging');
+  if (e.dataTransfer.files.length > 0) selectFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) selectFile(e.target.files[0]);
+});
+
+function selectFile(file) {
+  selectedFile = file;
+  filenameText.textContent = file.name;
+  filenameDisplay.classList.remove('hidden');
+  filenameDisplay.classList.add('flex');
+  uploadBtn.classList.remove('hidden');
+  uploadError.classList.add('hidden');
+}
+
+async function uploadFile() {
+  if (!selectedFile) return;
+
+  uploadBtn.disabled = true;
+  uploadProgress.classList.remove('hidden');
+  uploadError.classList.add('hidden');
+
+  // Simulate progress animation
+  let prog = 0;
+  const interval = setInterval(() => {
+    prog = Math.min(prog + Math.random() * 15, 85);
+    progressBar.style.width = prog + '%';
+  }, 200);
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    clearInterval(interval);
+    if (data.success) {
+      progressBar.style.width = '100%';
+      setTimeout(() => { window.location.href = data.redirect; }, 300);
+    } else {
+      progressBar.style.width = '0%';
+      uploadProgress.classList.add('hidden');
+      uploadError.textContent = data.error || 'Upload failed. Please try again.';
+      uploadError.classList.remove('hidden');
+      uploadBtn.disabled = false;
+    }
+  } catch (err) {
+    clearInterval(interval);
+    uploadProgress.classList.add('hidden');
+    uploadError.textContent = 'Network error. Please check your connection.';
+    uploadError.classList.remove('hidden');
+    uploadBtn.disabled = false;
+  }
+}
+
+function toggleJoinPassword() {
+  const input = document.getElementById('join-password');
+  const icon = document.getElementById('join-eye-icon');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>';
+  } else {
+    input.type = 'password';
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
+  }
+}
+
+async function joinSession() {
+  const sessionId = document.getElementById('join-session-id').value.trim();
+  const password = document.getElementById('join-password').value.trim();
+  const errorEl = document.getElementById('join-error');
+  const btn = document.getElementById('join-btn');
+
+  errorEl.classList.add('hidden');
+
+  if (!sessionId) {
+    errorEl.textContent = 'Please enter a Session ID.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (!password) {
+    errorEl.textContent = 'Please enter a password.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Joining...';
+
+  try {
+    const res = await fetch('/api/session/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, password: password })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      window.location.href = data.redirect;
+    } else {
+      errorEl.textContent = data.error || 'Failed to join session.';
+      errorEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg> Join Session';
+    }
+  } catch (err) {
+    errorEl.textContent = 'Network error. Please check your connection.';
+    errorEl.classList.remove('hidden');
+    btn.disabled = false;
+    btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg> Join Session';
+  }
+}
+
+document.getElementById('join-session-id').addEventListener('keydown', e => { if (e.key === 'Enter') joinSession(); });
+document.getElementById('join-password').addEventListener('keydown', e => { if (e.key === 'Enter') joinSession(); });
+</script>
+{% endblock %}
